@@ -664,11 +664,21 @@ class Utility {
   }
 
   static func resolvePaths(_ paths: [String]) -> [String] {
-    return paths.map { (try? URL(resolvingAliasFileAt: URL(fileURLWithPath: $0)))?.path ?? $0 }
+    return paths.map {
+      let original = URL(fileURLWithPath: $0)
+      let resolvedAlias = (try? URL(resolvingAliasFileAt: original)) ?? original
+      // Canonicalize path to keep watch-later lookups stable across open methods.
+      return resolvedAlias.standardizedFileURL.resolvingSymlinksInPath().path
+    }
   }
 
   static func resolveURLs(_ urls: [URL]) -> [URL] {
-    return urls.map { (try? URL(resolvingAliasFileAt: $0)) ?? $0 }
+    return urls.map {
+      guard $0.isFileURL else { return $0 }
+      let resolvedAlias = (try? URL(resolvingAliasFileAt: $0)) ?? $0
+      // Canonicalize path to keep watch-later lookups stable across open methods.
+      return resolvedAlias.standardizedFileURL.resolvingSymlinksInPath()
+    }
   }
 }
 
