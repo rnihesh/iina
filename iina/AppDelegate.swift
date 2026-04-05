@@ -1329,7 +1329,10 @@ class RemoteCommandController {
 
   func disable() {
     guard isEnabled else { return }
-    commands.forEach { $0.removeTarget(nil) }
+    commands.forEach {
+      $0.removeTarget(nil)
+      $0.isEnabled = false
+    }
     isEnabled = false
     log("Disabled media keys and remote commands")
   }
@@ -1337,6 +1340,26 @@ class RemoteCommandController {
   func enable() {
     guard RemoteCommandController.useSystemMediaControl, !isEnabled else { return }
     let remoteCommand = MPRemoteCommandCenter.shared()
+    let forwardIntervals = formPreferredIntervalsValue("FORWARD")
+    let backwardIntervals = formPreferredIntervalsValue("REWIND")
+    let forwardInterval = forwardIntervals.first?.doubleValue ?? 15
+    let backwardInterval = backwardIntervals.first?.doubleValue ?? 15
+
+    // Explicitly enable supported commands. Apple docs note disabled commands are hidden from
+    // system UIs, so this controls which mini-player buttons macOS can present.
+    remoteCommand.playCommand.isEnabled = true
+    remoteCommand.pauseCommand.isEnabled = true
+    remoteCommand.togglePlayPauseCommand.isEnabled = true
+    remoteCommand.stopCommand.isEnabled = true
+    remoteCommand.nextTrackCommand.isEnabled = true
+    remoteCommand.previousTrackCommand.isEnabled = true
+    remoteCommand.seekForwardCommand.isEnabled = true
+    remoteCommand.seekBackwardCommand.isEnabled = true
+    remoteCommand.skipForwardCommand.isEnabled = !forwardIntervals.isEmpty
+    remoteCommand.skipBackwardCommand.isEnabled = !backwardIntervals.isEmpty
+    remoteCommand.changeRepeatModeCommand.isEnabled = true
+    remoteCommand.changePlaybackRateCommand.isEnabled = true
+    remoteCommand.changePlaybackPositionCommand.isEnabled = true
 
     // For each command, apply a configured keybinding or fallback to default values.
     remoteCommand.playCommand.addTarget { _ in
@@ -1387,7 +1410,27 @@ class RemoteCommandController {
       }
       return .success
     }
-    remoteCommand.skipForwardCommand.preferredIntervals = formPreferredIntervalsValue("FORWARD")
+    remoteCommand.seekForwardCommand.addTarget { event in
+      let seekEvent = event as! MPSeekCommandEvent
+      guard seekEvent.type == .beginSeeking else { return .success }
+      if let action = PlayerCore.keyBindings["FORWARD"] {
+        PlayerCore.lastActive.mainWindow.handleKeyBinding(action)
+      } else {
+        PlayerCore.lastActive.seek(relativeSecond: forwardInterval, option: .exact)
+      }
+      return .success
+    }
+    remoteCommand.seekBackwardCommand.addTarget { event in
+      let seekEvent = event as! MPSeekCommandEvent
+      guard seekEvent.type == .beginSeeking else { return .success }
+      if let action = PlayerCore.keyBindings["REWIND"] {
+        PlayerCore.lastActive.mainWindow.handleKeyBinding(action)
+      } else {
+        PlayerCore.lastActive.seek(relativeSecond: -backwardInterval, option: .exact)
+      }
+      return .success
+    }
+    remoteCommand.skipForwardCommand.preferredIntervals = forwardIntervals
     remoteCommand.skipForwardCommand.addTarget { event in
       if let action = PlayerCore.keyBindings["FORWARD"] {
         PlayerCore.lastActive.mainWindow.handleKeyBinding(action)
@@ -1396,7 +1439,7 @@ class RemoteCommandController {
       }
       return .success
     }
-    remoteCommand.skipBackwardCommand.preferredIntervals = formPreferredIntervalsValue("REWIND")
+    remoteCommand.skipBackwardCommand.preferredIntervals = backwardIntervals
     remoteCommand.skipBackwardCommand.addTarget { event in
       if let action = PlayerCore.keyBindings["REWIND"] {
         PlayerCore.lastActive.mainWindow.handleKeyBinding(action)
@@ -1439,10 +1482,14 @@ class RemoteCommandController {
       remoteCommand.pauseCommand,
       remoteCommand.playCommand,
       remoteCommand.previousTrackCommand,
+      remoteCommand.seekBackwardCommand,
+      remoteCommand.seekForwardCommand,
       remoteCommand.skipBackwardCommand,
       remoteCommand.skipForwardCommand,
       remoteCommand.stopCommand,
       remoteCommand.togglePlayPauseCommand]
+
+    commands.forEach { $0.isEnabled = false }
 
     NotificationCenter.default.addObserver(forName: .iinaGlobalKeyBindingsChanged, object: nil,
                                            queue: .main) { [unowned self] _ in
